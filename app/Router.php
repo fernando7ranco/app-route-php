@@ -2,6 +2,7 @@
 
 namespace App;
 
+
 /**
  * Class Router
  * @method Router get($route, $callable)
@@ -16,6 +17,10 @@ class Router
      */
     private $routes = [];
 
+    private $lastRecordedRoute;
+
+    private $group;
+
     /**
      * @return string
      */
@@ -27,9 +32,10 @@ class Router
     /**
      * @return string
      */
-    public function uri()
+    public function uri(): string
     {
         $self = isset($_SERVER['PHP_SELF']) ? str_replace('index.php/', '', $_SERVER['PHP_SELF']) : '';
+
         $uri = isset($_SERVER['REQUEST_URI']) ? explode('?', $_SERVER['REQUEST_URI'])[0] : '';
 
         if ($self !== $uri) {
@@ -53,9 +59,13 @@ class Router
      */
     function __call($name, $arguments)
     {
-		//exemplo ->post('',''); ->get('',''); 
-		
-        return $this->on($name, isset($arguments[0]) ? $arguments[0] : '', isset($arguments[1]) ? $arguments[1] : '');
+		//exemplo ->post('','');  ->get('',''); 
+
+        $path = isset($arguments[0]) ? $arguments[0] : '' ;
+
+        $callback = isset($arguments[1]) ? $arguments[1] : '';
+
+        return $this->on($name, $path, $callback);
     }
 
     /**
@@ -64,18 +74,47 @@ class Router
      * @param $callback
      * @return $this
      */
-    public function on($method, $path, $callback)
+    public function on($method, $path, $callback): Router
     {
         $method = strtolower($method);
+
         if (!isset($this->routes[$method])) {
             $this->routes[$method] = [];
         }
 
-        $uri = substr($path, 0, 1) !== '/' ? '/' . $path : $path;
-        $pattern = str_replace('/', '\/', $uri);
-        $route = '/^' . $pattern . '$/';
+        $route = substr($path, 0, 1) !== '/' ? '/' . $path : $path;
 
-        $this->routes[$method][$route] = $callback;
+        if($this->group)
+            $route = $this->group.$route;
+
+        preg_match_all("~\{\s* ([a-zA-Z_][a-zA-Z0-9_-]*) \}~x", $route, $keys, PREG_SET_ORDER);
+
+        $data = [];
+
+        foreach ($keys as $key) {
+            $data[$key[1]] = null;
+        }
+
+        $this->routes[$method][$route] = [
+            'function' => $callback,
+            'data' => $data,
+            'name' => null
+        ];
+
+        $this->lastRecordedRoute = &$this->routes[$method][$route];
+
+        return $this;
+    }
+
+
+    /**
+     * @param $nameRouter
+     * @return $this
+     */
+
+    public function name($nameRouter): Router
+    {
+        $this->lastRecordedRoute['name'] = $nameRouter;
 
         return $this;
     }
@@ -102,15 +141,27 @@ class Router
     public function run($method, $uri)
     {
         $method = strtolower($method);
+
         if (!isset($this->routes[$method])) {
             return null;
         }
 
-        foreach ($this->routes[$method] as $route => $callback) {
+        foreach ($this->routes[$method] as $route => $element) {
+
+            $route = str_replace('/', '\/', $route);
+            $route = '/^'. preg_replace('~{([^}]*)}~', "([^\/]+)", $route) . '$/';
 
             if (preg_match($route, $uri, $parameters)) {
-                array_shift($parameters);// remove primeiro lemento do array
-                return $this->call($callback, $parameters);
+
+                //array_shift($parameters);// remove primeiro lemento do array que seria o path
+                $i = 1;
+                foreach ($element['data'] as &$value) {
+                    $value = $parameters[$i++];
+                }
+
+                $parameters[0] = $element['data'];
+
+                return $this->call($element['function'], $parameters);
             }
         }
         return null;
@@ -127,22 +178,48 @@ class Router
             return call_user_func_array($callback, $parameters);
         
 		// não é uma função vai verifica se pode ser uma classe de controller
-	
-		$array = explode('@',$callback);
-	
-		$classNamespace = "\App\Controller" . $array[0];
-		
-		if(class_exists($classNamespace)){
-		
-			$newClass = new $classNamespace;
-			
-			$method = isset($array[1]) ? $array[1] : 'index';
-			
-			if(method_exists($newClass, $method))
-				return $newClass->$method();
-			
-			return null;
-		}
+
+        $array = explode('@',$callback);
+
+        $classNamespace = __NAMESPACE__."\Controller\\" . $array[0];
+
+        if(class_exists($classNamespace)){
+
+            $newClass = new $classNamespace;
+
+            $method = isset($array[1]) ? $array[1] : 'index';
+
+            if(method_exists($newClass, $method))
+                return call_user_func_array(array($newClass, $method), $parameters);
+
+            return null;
+        }
     }
+
+    public function group($name,  $callback): Router
+    {
+
+        $this->group = substr($name, 0, 1) !== '/' ? '/' . $name : $name;
+
+        if (is_callable($callback))
+            call_user_func_array($callback, [$this]);
+
+		$this->group = null;
+
+        return $this;
+    }
+
+   	public function __toString(): string
+   	{
+   		$routes = '';
+
+   		foreach ($this->routes as $method => $uris) {
+
+   			foreach($uris as $uri => $value)
+   				$routes.= $method. ' -> '. $uri . ' '. ($value['name'] ? 'name -> '. $value['name'] : null) . PHP_EOL;
+   		}
+
+   		return $routes;
+   	}
 
 }
