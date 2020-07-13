@@ -21,6 +21,41 @@ class Router
 
     private $group;
 
+    public static $verbs = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
+
+
+
+    public function cache(callable $callback, string $dir = ''): Router
+    {
+    	$dirCache = ( $dir && is_dir($dir) ) ? $dir : __DIR__.'/file-cache-router/';
+
+    	if(!is_dir($dirCache))
+    		mkdir($dirCache, 0777);
+
+    	$filePath = $dirCache.'/routers.txt';
+
+    	if(file_exists($filePath)){
+
+	    	$text = file_get_contents($filePath);
+	    	$this->routes = json_decode($text, true);
+
+
+       }else if (is_callable($callback)){
+
+        	$routes = $this->routes;
+
+        	$this->routes = [];
+
+            call_user_func_array($callback, [$this]);
+
+            file_put_contents($filePath, json_encode($this->routes));
+
+            $this->routes = array_merge($routes, $this->routes);
+        }
+
+    	return $this;
+    }
+
     /**
      * @return string
      */
@@ -87,18 +122,27 @@ class Router
         if($this->group)
             $route = $this->group.$route;
 
-        preg_match_all("~\{\s* ([a-zA-Z_][a-zA-Z0-9_-]*) \}~x", $route, $keys, PREG_SET_ORDER);
+        preg_match_all("/\{[a-zA-Z0-9_-]+\}/", $route, $keys, PREG_SET_ORDER);
 
         $data = [];
 
         foreach ($keys as $key) {
-            $data[$key[1]] = null;
+            $data[$key[0]] = null;
         }
+
+        $routeRegex = str_replace('/', '\/', $route);
+
+	    $routeRegex = preg_replace('/{[^\/]+\}:(\([^\/]+\))/', '$1', $routeRegex);
+
+	    $routeRegex = preg_replace('/\{.*?\}/', "([^\/]+)", $routeRegex);
+
+	    $routeRegex = '/^'. $routeRegex . '$/';
 
         $this->routes[$method][$route] = [
             'function' => $callback,
             'data' => $data,
-            'name' => null
+            'name' => null,
+            'routeRegex' => $routeRegex
         ];
 
         $this->lastRecordedRoute = &$this->routes[$method][$route];
@@ -146,22 +190,20 @@ class Router
             return null;
         }
 
-        foreach ($this->routes[$method] as $route => $element) {
+        foreach ($this->routes[$method] as $route => $item) {
 
-            $route = str_replace('/', '\/', $route);
-            $route = '/^'. preg_replace('~{([^}]*)}~', "([^\/]+)", $route) . '$/';
 
-            if (preg_match($route, $uri, $parameters)) {
+            if (preg_match($item['routeRegex'], $uri, $parameters, PREG_OFFSET_CAPTURE)) {
 
                 //array_shift($parameters);// remove primeiro lemento do array que seria o path
                 $i = 1;
-                foreach ($element['data'] as &$value) {
+                foreach ($item['data'] as &$value) {
                     $value = $parameters[$i++];
                 }
 
-                $parameters[0] = $element['data'];
+                $parameters[0] = $item['data'];
 
-                return $this->call($element['function'], $parameters);
+                return $this->call($item['function'], $parameters);
             }
         }
         return null;
