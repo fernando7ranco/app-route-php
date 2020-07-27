@@ -113,3 +113,27 @@ $router->delete('user/delete/{id}:(\d+)', 'Controller@delete');
 
 echo $router;
 ```
+
+###### Cache de rotas de controllers
+metodo cache recebe dois paramentros cache(callable $callback, string $dir = '')
+$callback Closure 
+$dir caminho do arquivo que armazenara o cache das rotas, por padrão é usado o mesmo diretorio da classe Router
+```php
+use App\Router;
+
+$router = new Router();
+
+$router->cache(function($router){
+	for($i = 0; $i < 600; $i++){
+		$router->group('gruponome'.$i, function($r){
+		    $r->get('teste/{id}:(\d+)/{name}:([a-z]+)', 'Controller@index');
+		    $r->get('teste2/{id2}/{name2}', 'Controller@index');
+		});
+	}
+});
+
+echo $router($router->method(), $router->uri());
+
+```
+
+
