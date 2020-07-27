@@ -23,22 +23,25 @@ class Router
 
     public static $verbs = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 
-
-
     public function cache(callable $callback, string $dir = ''): Router
     {
+
+
     	$dirCache = ( $dir && is_dir($dir) ) ? $dir : __DIR__.'/file-cache-router/';
 
     	if(!is_dir($dirCache))
     		mkdir($dirCache, 0777);
 
     	$filePath = $dirCache.'/routers.txt';
+        
+        $debug_backtrace = debug_backtrace();
+        
+        $file = $debug_backtrace[0]['file'];
 
-    	if(file_exists($filePath)){
+    	if(file_exists($filePath) and filemtime($filePath) >= filemtime($file)){
 
 	    	$text = file_get_contents($filePath);
 	    	$this->routes = json_decode($text, true);
-
 
        }else if (is_callable($callback)){
 
@@ -111,6 +114,10 @@ class Router
      */
     public function on($method, $path, $callback): Router
     {
+
+        if(!in_array(strtoupper($method), Router::$verbs))
+            die('method '.$method. ' not existe');
+        
         $method = strtolower($method);
 
         if (!isset($this->routes[$method])) {
